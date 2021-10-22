@@ -59,34 +59,30 @@ impl<T> RingBufEntry<T> {
 impl RingBuf {
     /// Declare a BPF ring buffer.
     ///
-    /// `max_entries` must be a power of two.
-    pub const fn with_max_entries(max_entries: u32, flags: u32) -> RingBuf {
-        RingBuf {
-            def: UnsafeCell::new(bpf_map_def {
-                type_: BPF_MAP_TYPE_RINGBUF,
-                key_size: 0,
-                value_size: 0,
-                max_entries,
-                map_flags: flags,
-                id: 0,
-                pinning: PinningType::None as u32,
-            }),
-        }
+    /// `byte_size` should be a power-of-2 multiple of the page size. If it is not, it will
+    /// be coerced to the next largest valid size when the program is loaded..
+    pub const fn with_byte_size(byte_size: u32, flags: u32) -> Self {
+        Self::new(byte_size, flags, PinningType::None)
     }
 
     /// Declare a pinned BPF ring buffer.
     ///
-    /// `max_entries` must be a power of two.
-    pub const fn pinned(max_entries: u32, flags: u32) -> RingBuf {
-        RingBuf {
+    /// `byte_size` should be a power-of-2 multiple of the page size. If it is not, it will
+    /// be coerced to the next largest valid size when the program is loaded..
+    pub const fn pinned(byte_size: u32, flags: u32) -> Self {
+        Self::new(byte_size, flags, PinningType::ByName)
+    }
+
+    const fn new(byte_size: u32, flags: u32, pinning_type: PinningType) -> Self {
+        Self {
             def: UnsafeCell::new(bpf_map_def {
                 type_: BPF_MAP_TYPE_RINGBUF,
                 key_size: 0,
                 value_size: 0,
-                max_entries,
+                max_entries: byte_size,
                 map_flags: flags,
                 id: 0,
-                pinning: PinningType::ByName as u32,
+                pinning: pinning_type as u32,
             }),
         }
     }
