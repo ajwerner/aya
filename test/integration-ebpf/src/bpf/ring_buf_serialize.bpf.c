@@ -45,7 +45,7 @@ queue_entry_t *pop(queue_t *queue) {
 
 void enqueue(queue_t *queue, type_id_t type, void *ptr, __u32 len) {
     __u64 idx = queue->tail;
-    if (idx < QUEUE_MAX_LEN-1) {
+    if (idx < QUEUE_MAX_LEN-2) {
         queue_entry_t *entry = &queue->entries[idx];
         *entry = (queue_entry_t) {.type = type, .ptr = ptr, .len = len};
         queue->tail++;   
@@ -59,6 +59,7 @@ struct {
     __uint(max_entries, 1);
 } QUEUE SEC(".maps");
 
+#define PTR(x) __u64
 
 typedef struct Bar {
     unsigned long long int c;
@@ -74,13 +75,26 @@ typedef struct Foo {
     unsigned long long a;
     unsigned long long b;
     Str_t str;
-    unsigned long long bar;
+    PTR(Foo_t) foo;
+    PTR(Bar_t) bar;
 } Foo_t;
 
 typedef struct queue_context {
     void *buffer;
     unsigned int buffer_offset;
 } queue_context_t;
+
+static __u32 enqueue_str_children(queue_t *queue, Str_t *str) {
+    enqueue(queue, PROGRAM_TYPE_STR, (void *)(str->ptr), (__u32)(str->len));
+    return 0;
+}
+
+static __u32 enqueue_foo_children(queue_t *queue, Foo_t *foo) {
+    enqueue(queue, PROGRAM_TYPE_BAR, (void *)(foo->bar), 0);
+    enqueue(queue, PROGRAM_TYPE_FOO, (void *)(foo->foo), 0);
+    enqueue_str_children(queue, &foo->str);
+    return 0;
+}
 
 static long loop_queue(__u32 idx, queue_context_t *ctx) {
     queue_context_t *context = (queue_context_t *)ctx;
@@ -110,8 +124,7 @@ static long loop_queue(__u32 idx, queue_context_t *ctx) {
                 return 1;
             }
             context->buffer_offset += sizeof(Foo_t);
-            enqueue(queue, PROGRAM_TYPE_BAR, (void *)(foo->bar), 0);
-            enqueue(queue, PROGRAM_TYPE_STR, (void *)(foo->str.ptr), (__u32)(foo->str.len));
+            enqueue_foo_children(queue, foo);
             break;
         case PROGRAM_TYPE_BAR:
             if (context->buffer_offset+sizeof(Bar_t) >= BUF_LEN) {
@@ -130,7 +143,7 @@ static long loop_queue(__u32 idx, queue_context_t *ctx) {
                 return 1;
             }
             context->buffer_offset += entry->len;
-            return 1;
+            break;
         default:
             return 1;
     }

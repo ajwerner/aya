@@ -23,12 +23,13 @@ async fn ring_buf_async() {
         .unwrap()
         .try_into()
         .unwrap();
-    prog.load()
-        .map_err(|v| {
-            println!("{v}");
-            v
-        })
-        .unwrap();
+    match prog.load() {
+        Ok(_) => {}
+        Err(e) => {
+            println!("{}", e);
+            panic!("failed")
+        }
+    }
     prog.attach(Some("do_thing"), 0, "/proc/self/exe", None)
         .unwrap();
 
@@ -73,6 +74,7 @@ pub struct Foo {
     a: u64,
     b: u64,
     str: Str,
+    foo: *mut Foo,
     bar: *mut Bar,
 }
 
@@ -101,8 +103,18 @@ impl Foo {
             len: STRING.len() as u64,
             data: STRING.as_ptr() as *mut u8,
         };
-        let foo = std::boxed::Box::into_raw(std::boxed::Box::new(Foo { a, b, str, bar }));
-        foo
+        let foo = if d > 0 {
+            Foo::new(a, b, c, d.checked_sub(1).unwrap_or_default())
+        } else {
+            std::ptr::null_mut()
+        };
+        std::boxed::Box::into_raw(std::boxed::Box::new(Foo {
+            a,
+            b,
+            str,
+            foo,
+            bar,
+        }))
     }
 }
 
@@ -113,6 +125,6 @@ pub extern "C" fn do_thing(_foo: *mut Foo) {}
 async fn call_trigger() {
     for _ in 0..N {
         sleep(std::time::Duration::from_secs(1)).await;
-        do_thing(Foo::new(1, 2, 3, 4))
+        do_thing(Foo::new(1, 2, 3, 16))
     }
 }
