@@ -13,6 +13,7 @@ pub mod rbpf;
 pub mod relocations;
 pub mod ring_buf;
 pub mod ring_buf_async;
+pub mod ring_buf_serialize;
 pub mod smoke;
 
 pub use integration_test_macros::{integration_test, tokio_integration_test};
