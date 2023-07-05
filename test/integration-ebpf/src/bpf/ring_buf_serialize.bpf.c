@@ -43,17 +43,23 @@ queue_entry_t *pop(queue_t *queue) {
     return entry;
 }
 
-void enqueue(queue_t *queue, type_id_t type, void *ptr, __u32 len) {
+typedef __u32 piece_id_t;
+
+piece_id_t enqueue(queue_t *queue, type_id_t type, void *ptr, __u32 len) {
+    if (ptr == NULL) {
+        return 0;
+    }
     __u64 idx = queue->tail;
     if (idx < QUEUE_MAX_LEN-2) {
         queue_entry_t *entry = &queue->entries[idx];
         *entry = (queue_entry_t) {.type = type, .ptr = ptr, .len = len};
         queue->tail++;   
     }
+    return queue->tail;
 }
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
     __type(value, queue_t);
     __uint(max_entries, 1);
@@ -79,25 +85,32 @@ typedef struct Foo {
     PTR(Bar_t) bar;
 } Foo_t;
 
-typedef struct queue_context {
-    void *buffer;
-    unsigned int buffer_offset;
-} queue_context_t;
+typedef struct output_buffer {
+    char *buffer;
+    unsigned int offset;
+} output_buffer_t;
 
-static __u32 enqueue_str_children(queue_t *queue, Str_t *str) {
-    enqueue(queue, PROGRAM_TYPE_STR, (void *)(str->ptr), (__u32)(str->len));
-    return 0;
+static void write_output_buffer_piece_header(output_buffer_t *b, __u32 len) {
+    if (b->offset+sizeof(__u32) >= BUF_LEN) {
+        return;
+    }
+    __u32 *header = (__u32 *)(&b->buffer[b->offset]);
+    b->offset += sizeof(__u32);
 }
 
-static __u32 enqueue_foo_children(queue_t *queue, Foo_t *foo) {
+static void enqueue_str_children(queue_t *queue, Str_t *str) {
+    enqueue(queue, PROGRAM_TYPE_STR, (void *)(str->ptr), (__u32)(str->len));
+}
+
+static void enqueue_foo_children(queue_t *queue, Foo_t *foo) {
     enqueue(queue, PROGRAM_TYPE_BAR, (void *)(foo->bar), 0);
     enqueue(queue, PROGRAM_TYPE_FOO, (void *)(foo->foo), 0);
     enqueue_str_children(queue, &foo->str);
-    return 0;
 }
 
-static long loop_queue(__u32 idx, queue_context_t *ctx) {
-    queue_context_t *context = (queue_context_t *)ctx;
+
+static long loop_queue(__u32 idx, output_buffer_t *ctx) {
+    output_buffer_t *context = (output_buffer_t *)ctx;
     const __u32 zero = 0;
     queue_t *queue = bpf_map_lookup_elem(&QUEUE, &zero);
     if (!queue) {
@@ -109,40 +122,44 @@ static long loop_queue(__u32 idx, queue_context_t *ctx) {
     }
     switch (entry->type) {
         case PROGRAM_TYPE_FOO:
-            if (context->buffer_offset+sizeof(Foo_t) >= BUF_LEN) {
+            write_output_buffer_piece_header(context, sizeof(Foo_t));
+            if (context->offset+sizeof(Foo_t) >= BUF_LEN) {
                 return 1;
             }
-            if (bpf_probe_read_user(context->buffer+context->buffer_offset, sizeof(Foo_t), entry->ptr)) {
+            if (bpf_probe_read_user(&context->buffer[context->offset], sizeof(Foo_t), entry->ptr)) {
                 return 1;
             }
             if (queue->tail + 2 >= QUEUE_MAX_LEN) {
                 return 1;
             }
 
-            Foo_t *foo = (Foo_t *)(context->buffer+context->buffer_offset);
-            if (context->buffer_offset+sizeof(Foo_t) >= BUF_LEN) {
+            Foo_t *foo = (Foo_t *)(&context->buffer[context->offset]);
+            if (context->offset+sizeof(Foo_t) >= BUF_LEN) {
                 return 1;
             }
-            context->buffer_offset += sizeof(Foo_t);
+            context->offset += sizeof(Foo_t);
             enqueue_foo_children(queue, foo);
             break;
         case PROGRAM_TYPE_BAR:
-            if (context->buffer_offset+sizeof(Bar_t) >= BUF_LEN) {
+            write_output_buffer_piece_header(context, sizeof(Bar_t));
+            if (context->offset+sizeof(Bar_t) >= BUF_LEN) {
                 return 1;
             }
-            if (bpf_probe_read_user(context->buffer+context->buffer_offset, sizeof(Bar_t), entry->ptr)) {
+            if (bpf_probe_read_user(context->buffer+context->offset, sizeof(Bar_t), entry->ptr)) {
                 return 1;
             }
-            context->buffer_offset += sizeof(Bar_t);
+            context->offset += sizeof(Bar_t);
             break;
         case PROGRAM_TYPE_STR:
             if (entry->len > BUF_LEN) {
                 return 1;
             }
-            if (bpf_probe_read_user(context->buffer+context->buffer_offset, entry->len, entry->ptr)) {
+            context->offset *= 2;
+            bpf_printk("offset: %d\n", context->offset);
+            if (bpf_probe_read_user(context->buffer+context->offset, 1024, entry->ptr)) {
                 return 1;
             }
-            context->buffer_offset += entry->len;
+            context->offset += entry->len;
             break;
         default:
             return 1;
@@ -165,9 +182,9 @@ int BPF_KPROBE(test_ring_buf_serialize, void *foo_ptr) {
     if (!buf) {
         return 0;
     }
-    queue_context_t context = {
+    output_buffer_t context = {
         .buffer = buf,
-        .buffer_offset = 0,
+        .offset = 0,
     };
     enqueue(queue, PROGRAM_TYPE_FOO, foo_ptr, 0);
 
