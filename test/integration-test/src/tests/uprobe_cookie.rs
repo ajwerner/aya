@@ -2,6 +2,19 @@ use aya::{maps::ring_buf::RingBuf, programs::UProbe, EbpfLoader};
 use test_log::test;
 
 #[test]
+fn test_loop_sim() {
+    let mut bpf = EbpfLoader::new().load(crate::LOOP_SIM).unwrap();
+    let prog: &mut UProbe = bpf.program_mut("loop_sim").unwrap().try_into().unwrap();
+
+    prog.load().unwrap();
+
+    const PROG_B: &str = "uprobe_cookie_trigger_ebpf_program_b";
+    let a = prog.attach(PROG_B, "/proc/self/exe", None, None).unwrap();
+    uprobe_cookie_trigger_ebpf_program_b(1);
+    prog.detach(a).unwrap();
+}
+
+#[test]
 fn test_uprobe_cookie() {
     const RING_BUF_BYTE_SIZE: u32 = 512; // arbitrary, but big enough
 

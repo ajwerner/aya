@@ -12,6 +12,7 @@ pub const TEXT_64_64_RELOC: &[u8] =
     include_bytes_aligned!(concat!(env!("OUT_DIR"), "/text_64_64_reloc.o"));
 pub const VARIABLES_RELOC: &[u8] =
     include_bytes_aligned!(concat!(env!("OUT_DIR"), "/variables_reloc.bpf.o"));
+pub const LOOP_SIM: &[u8] = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/loop_sim.bpf.o"));
 
 pub const BPF_PROBE_READ: &[u8] =
     include_bytes_aligned!(concat!(env!("OUT_DIR"), "/bpf_probe_read"));

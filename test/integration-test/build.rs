@@ -69,6 +69,7 @@ fn main() -> Result<()> {
         ("reloc.bpf.c", true),
         ("text_64_64_reloc.c", false),
         ("variables_reloc.bpf.c", false),
+        ("loop_sim.bpf.c", true),
     ];
 
     if build_integration_bpf {
